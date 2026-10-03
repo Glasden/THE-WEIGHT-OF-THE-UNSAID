@@ -10,7 +10,11 @@
 //   B: (tx, ty, tz, glyph)  tangent = text x-axis; glyph < 0 => solid rounded rect
 //   C: (r, g, b, intensity)
 //   D: STATIC (rectW, rectH, -, seed)  ORBIT (radius, phase0, arcOffset, seed)  BURST (birth, speed, penOffset, seed)
-//   E: free per-mode extras               ORBIT (escape weight, -, -, -)       BURST (dir.xyz, absorbDelay)
+//   E: STATIC (velocity.xyz, birth)        ORBIT (escape weight, -, -, -)       BURST (dir.xyz, absorbDelay)
+//
+// STATIC extras (uReveal = 1): a glyph appears at its birth time; after uKickT every glyph flies off along its
+// velocity with drag, and glyphs born before the kick flash and die. ORBIT extras (uUni = 1): the galaxy's
+// "uniform" state — a wave of pasted replies that recolours, flattens and regularises it, undone by deletions.
 
 import { Program, texture } from './gl.js';
 
@@ -45,6 +49,16 @@ uniform float uGrow;
 uniform float uAbsorb;
 // depth split for lensing (draw only z>split or z<split); 0 disables
 uniform float uSplit; uniform int uSplitSide;
+// static: reveal by birth time, then the kick
+uniform int uReveal;
+uniform float uRevealFade, uKickT, uKickDrag, uKickFlash, uRevealFlash;
+uniform vec2 uKillAt;
+// orbit: the uniform state
+uniform int uUni, uRepN;
+uniform vec3 uUniC, uUniCol;
+uniform float uUniR, uUniW, uRestore, uHeroR, uUniA, uPitchK, uSnap;
+uniform vec4 uSeeds;
+uniform float uRep[64];
 
 out vec2 vUv;
 flat out vec4 vRect;    // atlas x, y, w(px), adv(em)
@@ -57,20 +71,50 @@ vec4 entry(float id) {
   return texelFetch(uEntries, ivec2(i & 4095, i >> 12), 0);
 }
 
+float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y);
+}
+// how far the paste has taken this point (0 = itself, 1 = the same as everything else)
+float uniAmt(vec2 x) {
+  float w = 1.0 - smoothstep(uUniR - uUniW, uUniR, length(x - uUniC.xz));
+  float n = vnoise(x / 170.0) * 0.65 + vnoise(x / 61.0 + 7.3) * 0.35;
+  n = clamp((n - 0.2) / 0.6, 0.0, 1.0) * 0.86 + 0.1;
+  n = min(n, 0.3 * length(x - uSeeds.xy) / 140.0);
+  n = min(n, 0.05 + 0.3 * length(x - uSeeds.zw) / 140.0);
+  n = max(n, 1.0 - smoothstep(uHeroR * 0.45, uHeroR, length(x - uUniC.xz)));
+  return w * (1.0 - smoothstep(n - 0.03, n + 0.03, uRestore));
+}
+
 void main() {
   float s = iA.w;
   float gid = iB.w;
   bool isRect = gid < 0.0;
-  vec4 e = isRect ? vec4(0.0, 0.0, 0.0, iD.x) : entry(gid);
   vec3 P, T;
+  vec4 col = iC;
   float fade = 1.0;
   if (uMode == 1) {
     float r = iD.x;
     float v = uV0 * r / sqrt(r * r + uRc * uRc);
-    float phi = iD.y + v / r * uTime + iD.z / r;
+    float ph0 = iD.y, yy = iA.y;
+    float phi = ph0 + v / r * uTime + iD.z / r;
+    if (uUni == 1) {
+      float u = uniAmt(vec2(cos(phi), sin(phi)) * r);
+      if (u > 0.0) {
+        // every line slides onto one of four perfect spirals, the disc goes flat, the colours and the words become one
+        float arm = -log(max(r, 20.0) / 60.0) * uPitchK;
+        float snap = arm + floor((ph0 - arm) / 1.5707963 + 0.5) * 1.5707963;
+        ph0 = mix(ph0, snap, u * 0.72 * uSnap);
+        yy *= 1.0 - 0.8 * u * uSnap;
+        phi = ph0 + v / r * uTime + iD.z / r;
+        col = vec4(mix(iC.rgb, uUniCol, u), mix(iC.a, uUniA * (0.3 + 0.7 * smoothstep(50.0, 260.0, r)), u));
+        if (uRepN > 0 && !isRect && u > 0.15 + 0.7 * fract(iD.w * 7.31 + 0.13)) gid = uRep[gl_InstanceID % uRepN];
+      }
+    }
     vec3 rad = vec3(cos(phi), 0.0, sin(phi));
     T = vec3(-sin(phi), 0.0, cos(phi));
-    P = rad * r + vec3(0.0, iA.y, 0.0);
+    P = rad * r + vec3(0.0, yy, 0.0);
     // dark matter removed: each glyph flies off along its own tangent
     float w = smoothstep(uEscapeR.x, uEscapeR.y, r) * iE.x;
     float tau = uUnbind * w;
@@ -98,7 +142,18 @@ void main() {
   } else {
     P = iA.xyz;
     T = iB.xyz;
+    if (uReveal == 1) {
+      float age = uTime - iE.w;
+      if (age < 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+      fade *= smoothstep(0.0, uRevealFade, age) * (1.0 + uRevealFlash * exp(-age * 8.0));
+      if (uKickT > 0.0 && uTime > uKickT) {
+        float a = uTime - uKickT;
+        P += iE.xyz * (1.0 - exp(-a * uKickDrag)) / uKickDrag;
+        if (iE.w < uKickT) fade *= (1.0 + uKickFlash * exp(-a * 9.0)) * (1.0 - smoothstep(uKillAt.x, uKillAt.y, a));
+      }
+    }
   }
+  vec4 e = isRect ? vec4(0.0, 0.0, 0.0, iD.x) : entry(gid);
 
   P = (uModel * vec4(P, 1.0)).xyz;
   T = normalize(mat3(uModel) * T);
@@ -153,7 +208,7 @@ void main() {
 
   vUv = q;
   vRect = vec4(e.xyz, adv);
-  vColor = vec4(iC.rgb, iC.a * uIntensity * fade);
+  vColor = vec4(col.rgb, col.a * uIntensity * fade);
   vBlur = vec4(blurEm, discT, glyphPx, isRect ? 1.0 : 0.0);
   vBox = isRect ? vec2(iD.x, iD.y) : vec2(0.0);
   if (vColor.a <= 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
@@ -356,6 +411,8 @@ export class GlyphLayer {
       .set('uMode', this.mode).set('uEm', m.em).set('uCell', m.cell).set('uSpread', m.spread).set('uBaseline', m.baseline)
       .set('uAtlasSize', [m.width, m.height])
       .set('uSplit', 0).set('uSplitSide', 0).set('uAbsorb', -1e9).set('uUnbind', 0).set('uEscapeR', [1e9, 2e9])
+      .set('uReveal', 0).set('uKickT', 0).set('uKickDrag', 1.6).set('uKickFlash', 0).set('uKillAt', [0.05, 0.35]).set('uRevealFade', 0.12).set('uRevealFlash', 0)
+      .set('uUni', 0).set('uRepN', 0)
       .set('uUp', [0, 1, 0]).set('uDimNear', [0, 0, 1]).set('uSinkMode', 0).set('uSwirlAxis', [0, 1, 0]).set('uGrow', 0).set('uModel', IDENT).set('uOrigin', [0, 0, 0]).set('uSink', [0, 0, 0]).set('uTime', 0).set('uV0', 0).set('uRc', 1);
     const u = { ...this.uniforms, ...extra };
     for (const k in u) if (k !== 'count') p.set(k, u[k]);

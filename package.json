@@ -7,7 +7,7 @@
   "scripts": {
     "events": "python3 engine/src/make_events.py",
     "assets": "python3 assets/build_assets.py",
-    "score": "python3 audio/score.py 0 301 out/score.wav",
+    "score": "python3 audio/score.py 0 272 out/score.wav",
     "render": "node engine/render/render.mjs"
   },
   "dependencies": {

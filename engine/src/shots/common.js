@@ -3,19 +3,42 @@ import { GlyphLayer, MODE } from '../glyphs.js';
 import { integrate, smoothstep, lerp, clamp } from '../math.js';
 import { vCirc } from '../galaxy.js';
 
-// Galactic time. Rates are "galactic seconds per film second".
-export function galRate(t) {
-  if (t < 50) return lerp(5.0, 0.15, smoothstep(34.5, 40.5, t));
-  if (t < 84) return 0.15;
-  if (t < 98) return lerp(0.15, 10, smoothstep(84, 88, t)) * (1 - smoothstep(94, 98, t)) + 0.3 * smoothstep(94, 98, t);
-  return 0.3;
+export const CYAN = [0.6, 0.88, 1.0];
+export const HOT = [0.88, 0.97, 1.0];
+export const AMBER = [1.0, 0.56, 0.22];
+export const WARM = [1.0, 0.92, 0.84];
+export const CYAN_P = [0.36, 0.76, 1.0];      // the AI's words on a phone: deeper, so they stay cyan at reading brightness
+
+// cursor blink: on for the first half of every second (the film's metronome)
+export const blink = (t, t0 = 0) => { const f = (((t - t0) % 1) + 1) % 1; return smoothstep(0, 0.035, f) * (1 - smoothstep(0.5, 0.535, f)); };
+
+// Galactic time for a stretch of film: integrate rate(t) from t0, starting at T0. Cached per t.
+export function clock(rate, t0, T0 = 0, step = 1 / 60) {
+  let ct = NaN, cv = 0;
+  return (t) => {
+    if (t === ct) return cv;
+    ct = t;
+    cv = T0 + integrate((u) => rate(t0 + u), t - t0, step);
+    return cv;
+  };
 }
-let _cacheT = -1, _cacheV = 0;
-export function galT(t) {
-  if (t === _cacheT) return _cacheV;
-  _cacheT = t;
-  _cacheV = integrate(galRate, t, 1 / 60);
-  return _cacheV;
+
+// Named lines by their text: tx.ids('chat', '到了吗')
+export class Texts {
+  constructor(named) {
+    this.m = {};
+    for (const [set, lines] of Object.entries(named)) {
+      this.m[set] = {};
+      for (const l of lines) this.m[set][l.text] ??= l.ids;
+    }
+  }
+  ids(set, text) {
+    const r = this.m[set] && this.m[set][text];
+    if (!r) throw new Error(`no named line ${set}: ${text}`);
+    return r;
+  }
+  has(set, text) { return !!(this.m[set] && this.m[set][text]); }
+  lines(set) { return Object.entries(this.m[set] || {}).map(([text, ids]) => ({ text, ids })); }
 }
 
 // Hero lines: hi-res glyphs riding the orbits so they stay put inside the moving galaxy.

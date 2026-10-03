@@ -72,7 +72,7 @@ const flags = LOCAL ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader',
   : ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-sandbox',
      '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'];
 const qs = new URLSearchParams({ w: W, h: H, out10: out10 ? 1 : 0, quality: args.quality || 1, ...(args.sub ? { sub: args.sub } : {}),
-  ...(args.test ? { test: args.test } : {}) });
+  ...(args.test ? { test: args.test } : {}), ...(args.only ? { only: args.only } : {}), ...(args.dbg ? { dbg: args.dbg } : {}) });
 
 async function openWorker(k) {
   const browser = await puppeteer.launch({ headless: true, protocolTimeout: 0, dumpio: !!args.dumpio,

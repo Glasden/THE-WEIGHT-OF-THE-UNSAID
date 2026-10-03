@@ -35,7 +35,7 @@ export function drawCards(g, t, W, H, shot) {
     any = true;
     const lt = t - c.start, rem = c.end - t;
     const fadeOut = smoothstep(0, 1.1, rem);
-    const cx = W / 2;
+    const cx = W * (shot && shot.cardX ? shot.cardX : 0.5);
     if (c.kind === 'title') {
       const s1 = H * 0.08, s2 = H * 0.021;
       const y = H * (shot && shot.cardY ? shot.cardY : 0.505);

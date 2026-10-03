@@ -105,12 +105,39 @@ export class Galaxy {
     this.haze = new Haze(gl, rnd);
   }
 
-  draw(cam, { T = 0, unbind = 0, escR = [1e9, 2e9], intensity = 1, hazeIntensity = 1, split = 0, splitSide = 0, model = IDENT, up = [0, 1, 0], frac = 1, dimNear = [0, 0, 1] } = {}) {
-    if (hazeIntensity > 0) this.haze.draw(cam, { T, unbind, escR, intensity: hazeIntensity * intensity, split, splitSide, model });
+  // uni: the pasted, uniform state — { C: centre [x,y,z], R, W: wave radius/softness, restore: 0..1+, seeds: [x,z,x,z], heroR, rep: glyph ids }
+  draw(cam, { T = 0, unbind = 0, escR = [1e9, 2e9], intensity = 1, hazeIntensity = 1, split = 0, splitSide = 0, model = IDENT, up = [0, 1, 0], frac = 1, dimNear = [0, 0, 1], uni = null } = {}) {
+    const U = uni ? { uUni: 1, uUniC: uni.C, uUniR: uni.R, uUniW: uni.W ?? 160, uRestore: uni.restore ?? 0, uSeeds: uni.seeds ?? [1e9, 1e9, 1e9, 1e9],
+      uHeroR: uni.heroR ?? 0, uUniCol: uni.col ?? [0.55, 0.85, 1.0], uUniA: uni.a ?? 0.85, uPitchK: 1 / Math.tan(GAL.pitch), uSnap: uni.snap ?? 1,
+      uRep: uni.rep ?? new Float32Array(64), uRepN: uni.rep ? uni.rep.length : 0 } : { uUni: 0 };
+    if (hazeIntensity > 0) this.haze.draw(cam, { T, unbind, escR, intensity: hazeIntensity * intensity, split, splitSide, model, U });
     this.layer.draw(cam, { uTime: T, uUnbind: unbind, uEscapeR: escR, uIntensity: intensity, uSplit: split, uSplitSide: splitSide,
-      uModel: model, uUp: up, uDimNear: dimNear, count: Math.round(this.layer.count * frac) });
+      uModel: model, uUp: up, uDimNear: dimNear, count: Math.round(this.layer.count * frac), ...U, uRep: padRep(U.uRep) });
   }
 }
+
+function padRep(r) { if (!r) return new Float32Array(64); const o = new Float32Array(64); o.set(r.slice(0, 64)); return o; }
+
+// Shared with the glyph shader: how far the paste has taken a point of the disc.
+const UNI_GLSL = `
+uniform int uUni;
+uniform vec3 uUniC, uUniCol;
+uniform float uUniR, uUniW, uRestore, uHeroR, uUniA;
+uniform vec4 uSeeds;
+float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y);
+}
+float uniAmt(vec2 x) {
+  float w = 1.0 - smoothstep(uUniR - uUniW, uUniR, length(x - uUniC.xz));
+  float n = vnoise(x / 170.0) * 0.65 + vnoise(x / 61.0 + 7.3) * 0.35;
+  n = clamp((n - 0.2) / 0.6, 0.0, 1.0) * 0.86 + 0.1;
+  n = min(n, 0.3 * length(x - uSeeds.xy) / 140.0);
+  n = min(n, 0.05 + 0.3 * length(x - uSeeds.zw) / 140.0);
+  n = max(n, 1.0 - smoothstep(uHeroR * 0.45, uHeroR, length(x - uUniC.xz)));
+  return w * (1.0 - smoothstep(n - 0.03, n + 0.03, uRestore));
+}`;
 
 // Soft emissive gas tracing the arms; gives the galaxy its glow from afar.
 const HAZE_VS = `
@@ -122,6 +149,7 @@ uniform vec3 uCamPos;
 uniform float uTime, uV0, uRc, uUnbind, uIntensity, uSplit;
 uniform vec2 uEscapeR;
 uniform int uSplitSide;
+${UNI_GLSL}
 out vec2 vQ; flat out vec4 vC;
 void main() {
   float r = iA.x;
@@ -140,6 +168,7 @@ void main() {
   gl_Position = uProj * vc;
   vQ = q;
   vC = vec4(iB.rgb, iB.a * uIntensity * near);
+  if (uUni == 1) { float u = uniAmt(P.xz); vC = vec4(mix(vC.rgb, uUniCol * 0.8, u), vC.a * mix(1.0, 0.75, u)); }
 }`;
 const HAZE_FS = `
 in vec2 vQ; flat in vec4 vC; out vec4 o;
@@ -187,9 +216,11 @@ class Haze {
     }
     gl.bindVertexArray(null);
   }
-  draw(cam, { T, unbind, escR, intensity, split, splitSide, model }) {
+  draw(cam, { T, unbind, escR, intensity, split, splitSide, model, U = { uUni: 0 } }) {
     const gl = this.gl;
-    this.prog.use().set('uModel', model).set('uView', cam.view).set('uProj', cam.proj).set('uCamPos', cam.pos).set('uTime', T)
+    const p = this.prog.use();
+    for (const k in U) if (k !== 'uRep' && k !== 'uRepN' && k !== 'uPitchK' && k !== 'uSnap') p.set(k, U[k]);
+    p.set('uModel', model).set('uView', cam.view).set('uProj', cam.proj).set('uCamPos', cam.pos).set('uTime', T)
       .set('uV0', GAL.V0).set('uRc', GAL.RC).set('uUnbind', unbind).set('uEscapeR', escR).set('uIntensity', intensity)
       .set('uSplit', split).set('uSplitSide', splitSide);
     gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);

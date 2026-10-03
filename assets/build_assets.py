@@ -35,6 +35,7 @@ STYLE_FONTS = {
     "serif": [("NotoSerifSC.ttf", 500), ("NotoSerif.ttf", 450), ("NotoSerifJP.ttf", 500), ("NotoSerifKR.ttf", 500)],
     "sans": [("NotoSansSC.ttf", 450), ("NotoSerifKR.ttf", 500), ("NotoSerif.ttf", 450)],
     "mono": [("JetBrainsMono.ttf", 450), ("NotoSansSC.ttf", 450)],
+    "ital": [("NotoSerif-Italic.ttf", 400), ("NotoSerif.ttf", 400), ("NotoSansSC.ttf", 400)],
     "anc": [("NotoSansCuneiform.ttf", None), ("NotoSansEgyptianHieroglyphs.ttf", None), ("NotoSansLinearB.ttf", None),
             ("NotoSansPhoenician.ttf", None), ("NotoSansUgaritic.ttf", None), ("NotoSansOldPersian.ttf", None)],
 }
@@ -260,7 +261,7 @@ def raster(args):
     if e["kind"] == "strokes":
         return raster_strokes(ORACLE[e["text"]], EM, CELL, SPREAD, SS)
     if e["kind"] == "space":
-        return None, EM * (0.5 if e["style"] in ("serif", "sans") else 0.6)
+        return None, EM * (0.27 if e["style"] == "ital" else 0.5 if e["style"] in ("serif", "sans") else 0.6)
     size = EM * SS
     f = get_font(e["font"], e.get("weight"), size)
     kw = {}
@@ -297,15 +298,7 @@ def main():
                  + [(l, "serif") for pid in (100, 2701, 1342, 2000, 17489, 2229, 1322, 12242, 1661, 84) for l in gutenberg_lines(pid, n=260)],
         "digital": [(l, "sans") for l in digital_lines()] + [(l, "mono") for l in code_lines()],
     }
-    named_src = {
-        "digital_hero": [(l, "sans") if not l.startswith("def ") else (l, "mono") for l in C.DIGITAL_HERO],
-        "classic_hero": [(l, "serif") for l in C.CLASSIC_HERO],
-        "classic_extra": [(l, "serif") for l in C.CLASSIC_EXTRA],
-        "unsaid": [(l.lstrip("~<"), "sans") for l in C.UNSAID],
-        "candidates": [(l, "sans") for l in C.CANDIDATES],
-        "credits": [(l, "serif") for l in C.CREDITS_INLINE],
-        "request": [(C.REQUEST_PREFIX, "sans"), (C.REQUEST_LINE, "sans")],
-    }
+    named_src = {}
     # Han glyph budget: keep the most frequent characters per style
     from collections import Counter
     freq = Counter()
@@ -337,21 +330,15 @@ def main():
     idx = {k: i for i, k in enumerate(keys)}
     corpus["layers"] = {n: [[idx[k] for k in t] for t in arr] for n, arr in corpus["layers"].items()}
     build_atlas("atlas", keys, (EM, CELL, SPREAD, SS))
+    # the pasted reply, in the galaxy's own (low-res) atlas: the uniform state repeats it everywhere
+    ans = "".join(t for t, _ in C.ANSWER1)
+    uni = [idx.get(f"sans:{ch}", idx.get(f"serif:{ch}")) for ch in ans]
+    missing = [ch for ch, i in zip(ans, uni) if i is None]
+    if missing: print("uniform: not in the galaxy atlas:", "".join(missing))
+    corpus["uniform"] = [i for i in uni if i is not None]
 
-    # hi-res atlas for hero text seen up close
-    named_src.update({
-        "opening": [(c, "sans") for _, cands in C.OPENING_TOKENS for c, _ in cands] + [(C.OPENING_SUB, "sans")],
-        "digits": [(C.OPENING_DIGITS, "sans")],
-        "ancient_hero": [(l, "anc") for l in ancient_lines(14)],
-        "pairs": [(l, "sans") for pr in C.PAIRS for l in pr],
-        "ancient4": [(ancient_from(i, n, 77 + i), "anc") for i, n in ((0, 7), (1, 8), (2, 9), (3, 11))],
-        "ancient_caps": [(l, "sans") for pair in ANCIENT_CAPS for l in pair],
-        "bonds": [(l, "serif") for l in C.CLASSIC_BONDS],
-        "voids": [(l, "sans") for l in C.UNSAID_VOIDS],
-        "keys": [(ch, "sans") for row in C.KEY_ROWS for ch in row],
-        "phone": [(l, "sans") for l in C.PHONE_TEXT],
-        "dive": [(C.DIVE_CHAIN, "serif")],
-    })
+    # hi-res atlas for hero text seen up close (v4: the story of one chat, see script/screenplay_v4.md)
+    named_src.update(v4_named())
     entries.clear()
     named = {}
     for name, lines in named_src.items():
@@ -361,20 +348,60 @@ def main():
             if t is None: raise SystemExit(f"named line not coverable: {name}: {l!r}")
             arr.append({"text": l, "keys": t})
         named[name] = arr
-    # oracle bone line: stroke-drawn entries, inserted as the 4th of five scripts (chronological)
-    okeys = []
-    for i, ch in enumerate("日月山水人大木雨"):
-        k = f"obs:{ch}"
-        entries[k] = dict(kind="strokes", text=ch, style="oracle")
-        okeys.append(k)
-    named["ancient4"].insert(3, {"text": "日月山水人大木雨", "keys": okeys})
     hkeys = sorted(entries.keys())
     hidx = {k: i for i, k in enumerate(hkeys)}
     corpus["named"] = {n: [{"text": d["text"], "ids": [hidx[k] for k in d["keys"]]} for d in arr] for n, arr in named.items()}
     corpus["opening"] = [{"token": tok, "cands": [[c, p] for c, p in cands]} for tok, cands in C.OPENING_TOKENS]
+    corpus["v4"] = v4_meta()
     build_atlas("atlas_hi", hkeys, (EM * 4, CELL * 4, SPREAD * 3, 2))
     (OUT / "corpus.json").write_text(json.dumps(corpus, ensure_ascii=False, separators=(",", ":")))
 
+
+def uniq(seq):
+    seen, out = set(), []
+    for x in seq:
+        if x not in seen: seen.add(x); out.append(x)
+    return out
+
+def v4_named():
+    chat = [it[1] for it in C.CHAT_LOG]
+    gloss = [it[2] for it in C.CHAT_LOG if it[0] != "date" and it[2]] + [C.DRAFT_FINE[1], C.FINAL_MSG[1], C.DAD_REPLY[1]] \
+        + [en for _, en in C.ASK] + C.ANSWER1_EN + [l[2] for l in C.LETTERS] + [l[4] for l in C.LETTERS] \
+        + [o[2] for o in C.OTHERS if o[0] not in ("Sam",)]
+    toks = uniq([t for t, _ in C.ANSWER1] + [c for _, cs in C.ANSWER1 for c, _ in cs] + C.ANSWER2 + C.ANSWER3)
+    fill = [m for m in C.DIGITAL if not any(ord(ch) > 0x2fff and not ("\u3000" <= ch <= "\u9fff" or "\uff00" <= ch <= "\uffef") for ch in m)][:60]
+    return {
+        "opening": [(c, "sans") for _, cands in C.OPENING_TOKENS for c, _ in cands] + [(C.OPENING_SUB, "sans")],
+        "digits": [(C.OPENING_DIGITS, "sans")],
+        "pairs": [(l, "sans") for pr in C.PAIRS for l in pr],
+        "bonds": [(l, "serif") for l in C.CLASSIC_BONDS],
+        "keys": [(ch, "sans") for row in C.KEY_ROWS for ch in row],
+        "chat": [(l, "sans") for l in uniq(chat)],
+        "gloss": [(l, "ital") for l in uniq(gloss)],
+        "phone": [(l, "sans") for l in uniq(C.PHONE_UI + [C.DRAFT_FINE[0], C.DRAFT_LATER, C.FINAL_MSG[0], C.DAD_REPLY[0], "的了我你是在吧好"])],
+        "ask": [(zh, "sans") for zh, _ in C.ASK],
+        "tokens": [(t, "sans") for t in toks],
+        "answers": [("".join(t for t, _ in C.ANSWER1), "sans"), ("".join(C.ANSWER2), "sans"), ("".join(C.ANSWER3), "sans")],
+        "tree": [(l, "sans") for l in C.REPLY_POOL],
+        "letters": [(l[0], l[1]) for l in C.LETTERS],
+        "letter_caps": [(l[3], "sans") for l in C.LETTERS],
+        "others": [(l, "sans") for o in C.OTHERS for l in (o[0], o[1], o[3])] + [("我们能谈谈吗？", "sans")],
+        "names": [(l, "sans") for l in C.OTHER_NAMES],
+        "fill": [(l, "sans") for l in fill],
+    }
+
+def v4_meta():
+    """structure the engine needs alongside the glyphs: which chat line is whose, what each token's alternatives are"""
+    return {
+        "chat": [{"k": it[0], "text": it[1], "gloss": None if it[0] == "date" else it[2]} for it in C.CHAT_LOG],
+        "draft_fine": list(C.DRAFT_FINE), "draft_later": C.DRAFT_LATER, "final": list(C.FINAL_MSG), "reply": list(C.DAD_REPLY),
+        "ask": [list(a) for a in C.ASK],
+        "answer1": [{"tok": t, "cands": [[c, p] for c, p in cs]} for t, cs in C.ANSWER1], "answer1_en": C.ANSWER1_EN,
+        "answer2": C.ANSWER2, "answer3": C.ANSWER3,
+        "letters": [{"text": l[0], "gloss": l[2], "cap": l[3], "cap_en": l[4]} for l in C.LETTERS],
+        "pairs": C.PAIRS_V4, "bonds": C.BONDS_V4,
+        "others": [{"name": o[0], "msg": o[1], "gloss": o[2], "reply": o[3]} for o in C.OTHERS],
+    }
 
 def build_atlas(name, keys, spec):
     EM, CELL, SPREAD, SS = spec
@@ -391,6 +418,7 @@ def build_atlas(name, keys, spec):
         rects.append((x, y, w, h)); x += w
     H = y + CELL
     H = 1 << (H - 1).bit_length()
+    if H > 8192: raise SystemExit(f"{name}: atlas would be {ATLAS_W}x{H}; trim the named lines or the em size")
     atlas = np.zeros((H, ATLAS_W), np.uint8)
     for (img, _), (rx, ry, w, h) in zip(results, rects):
         if img is not None: atlas[ry:ry + h, rx:rx + w] = img
