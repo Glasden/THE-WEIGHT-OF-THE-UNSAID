@@ -1,0 +1,6 @@
+# assets/build_assets.py and audio/*.py
+numpy>=2.0
+scipy>=1.13
+pillow>=11.0
+fonttools>=4.50
+opencc-python-reimplemented>=0.1.7

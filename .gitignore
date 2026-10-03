@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# renders, previews, audio exports
+out/
+*.mp4
+*.mov
+*.wav
+
+# third-party sources (assets/fetch_sources.sh) and generated atlases (assets/build_assets.py)
+assets/fonts/
+assets/corpus/raw/
+assets/build/
+
+.DS_Store
+Thumbs.db
