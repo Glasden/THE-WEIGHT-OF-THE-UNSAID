@@ -208,3 +208,7 @@ node engine/render/render.mjs --out out/stills/f_%05d.png --from 2400 --to 2401
 - 字体：Google Fonts 的 Noto 系列、Cormorant Garamond、JetBrains Mono，均为 SIL Open Font License 1.1
 - 英语及欧洲语种文本：Project Gutenberg，公有领域
 - 中文古典诗文：[chinese-poetry](https://github.com/chinese-poetry/chinese-poetry)，MIT
+
+## 许可证
+
+本仓库以 [MIT 许可证](LICENSE) 发布。上面列出的第三方资源遵循各自的许可证。

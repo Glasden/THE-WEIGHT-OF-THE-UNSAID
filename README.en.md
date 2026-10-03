@@ -214,3 +214,7 @@ None of this is in the repository. `assets/fetch_sources.sh` downloads it.
 - **Fonts:** Noto family, Cormorant Garamond and JetBrains Mono from Google Fonts. All are under the SIL Open Font License 1.1.
 - **English and European texts:** Project Gutenberg (public domain).
 - **Classical Chinese poetry and prose:** [chinese-poetry](https://github.com/chinese-poetry/chinese-poetry) (MIT).
+
+## License
+
+This repository is released under the [MIT License](LICENSE). The third-party material listed above keeps its own licenses.
